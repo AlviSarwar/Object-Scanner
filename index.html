@@ -1,0 +1,1434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Object Scanner - Cyberpunk HUD Edition</title>
+<style>
+  :root{
+    --bg: #0b0d0c;
+    --panel: #141712;
+    --line: #2a2f28;
+    --accent: #9fef00;
+    --accent-dim: #5c7a1c;
+    --text: #e8ede4;
+    --text-dim: #8a9182;
+    --mono: 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace;
+  }
+  body.light{
+    --bg: #f4f6f1;
+    --panel: #ffffff;
+    --line: #d7dccd;
+    --accent: #4c7a0a;
+    --accent-dim: #93b56a;
+    --text: #1c2117;
+    --text-dim: #5f6a56;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family: var(--mono);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:28px 16px 40px;
+  }
+  h1{
+    font-size:15px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    font-weight:500;
+    margin:0 0 4px;
+  }
+  .sub{
+    font-size:12px;
+    color:var(--accent-dim);
+    margin-bottom:22px;
+    letter-spacing:0.02em;
+  }
+  .stage{
+    position:relative;
+    width:100%;
+    max-width:640px;
+    aspect-ratio:4/3;
+    background:#000;
+    border:1px solid var(--line);
+    border-radius:2px;
+    overflow:hidden;
+  }
+  video, canvas{
+    position:absolute;
+    top:0; left:0;
+    width:100%;
+    height:100%;
+    object-fit:cover;
+  }
+  video{ transform: scaleX(-1); transition: filter 0.3s ease; }
+
+  /* Cyberpunk / Visual Filters */
+  video.filter-cyberpunk { filter: saturate(2) contrast(1.3) hue-rotate(290deg); }
+  video.filter-thermal { filter: invert(0.9) hue-rotate(180deg) saturate(3); }
+  video.filter-matrix { filter: grayscale(1) sepia(1) hue-rotate(90deg) saturate(5); }
+
+  .corner{
+    position:absolute;
+    width:22px; height:22px;
+    border-color:var(--accent);
+    opacity:0.85;
+    pointer-events:none;
+    z-index: 5;
+  }
+  .corner.tl{ top:10px; left:10px; border-top:2px solid var(--accent); border-left:2px solid var(--accent); }
+  .corner.tr{ top:10px; right:10px; border-top:2px solid var(--accent); border-right:2px solid var(--accent); }
+  .corner.bl{ bottom:10px; left:10px; border-bottom:2px solid var(--accent); border-left:2px solid var(--accent); }
+  .corner.br{ bottom:10px; right:10px; border-bottom:2px solid var(--accent); border-right:2px solid var(--accent); }
+
+  /* Center Crosshair for Color Detector */
+  .crosshair {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 16px; height: 16px;
+    margin-top: -8px; margin-left: -8px;
+    pointer-events: none;
+    z-index: 6;
+  }
+  .crosshair::before, .crosshair::after {
+    content: '';
+    position: absolute;
+    background: var(--accent);
+  }
+  .crosshair::before { top: 7px; left: 0; width: 16px; height: 2px; }
+  .crosshair::after { top: 0; left: 7px; width: 2px; height: 16px; }
+
+  .status{
+    position:absolute;
+    top:12px; left:50%;
+    transform:translateX(-50%);
+    font-size:11px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    background:rgba(0,0,0,0.5);
+    padding:4px 10px;
+    border-radius:20px;
+    pointer-events:none;
+    z-index: 6;
+  }
+  .status.live{ color:var(--accent); }
+  .dot{
+    display:inline-block;
+    width:6px; height:6px;
+    border-radius:50%;
+    background:var(--text-dim);
+    margin-right:6px;
+  }
+  .status.live .dot{ background:var(--accent); box-shadow:0 0 6px var(--accent); }
+
+  .panel{
+    width:100%;
+    max-width:640px;
+    margin-top:16px;
+    border:1px solid var(--line);
+    background:var(--panel);
+    border-radius:2px;
+    padding:14px 16px;
+    min-height:64px;
+  }
+  .panel-label{
+    font-size:10px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin-bottom:10px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .readout{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  .tag{
+    display:flex;
+    align-items:baseline;
+    gap:8px;
+    border:1px solid var(--accent-dim);
+    color:var(--accent);
+    padding:5px 10px;
+    border-radius:2px;
+    font-size:13px;
+    background:rgba(159,239,0,0.05);
+  }
+  .tag .pct{
+    font-size:10px;
+    color:var(--text-dim);
+  }
+  .empty{
+    color:var(--text-dim);
+    font-size:12px;
+  }
+  .tag .edit-btn, .tag .confirm-btn{
+    background:none;
+    border:none;
+    padding:0;
+    margin:0;
+    color:inherit;
+    opacity:0.55;
+    cursor:pointer;
+    font-size:12px;
+    line-height:1;
+  }
+  .tag .edit-btn:hover, .tag .confirm-btn:hover{ opacity:1; }
+
+  .save-toast{
+    font-size:11px;
+    color:var(--accent-dim);
+    margin-top:8px;
+    min-height:14px;
+  }
+
+  .edit-form{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .edit-form .hint{
+    font-size:11px;
+    color:var(--text-dim);
+    width:100%;
+  }
+  .edit-form input{
+    font-family:var(--mono);
+    background:#0b0d0c;
+    border:1px solid var(--accent-dim);
+    color:var(--text);
+    font-size:13px;
+    padding:6px 8px;
+    border-radius:2px;
+    min-width:160px;
+  }
+  .edit-form input:focus{ outline:none; border-color:var(--accent); }
+  .edit-form button{
+    margin:0;
+    padding:6px 12px;
+    font-size:11px;
+  }
+  .edit-form .cancel{
+    border-color:var(--line);
+    color:var(--text-dim);
+  }
+
+  .corrections{
+    width:100%;
+    max-width:640px;
+    margin-top:12px;
+  }
+  .corrections .panel-label{ margin-bottom:8px; }
+  .correction-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    font-size:12px;
+    padding:6px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .correction-row:last-child{ border-bottom:none; }
+  .correction-row .from{ color:var(--text-dim); }
+  .correction-row .arrow{ color:var(--text-dim); margin:0 6px; }
+  .correction-row .to{ color:var(--accent); }
+  .correction-row .remove{
+    background:none;
+    border:none;
+    color:var(--text-dim);
+    cursor:pointer;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    margin:0; padding:0;
+  }
+  .correction-row .remove:hover{ color:#ef6a5f; }
+
+  button{
+    font-family:var(--mono);
+    background:transparent;
+    border:1px solid var(--accent-dim);
+    color:var(--accent);
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:9px 18px;
+    border-radius:2px;
+    cursor:pointer;
+    margin-top:16px;
+  }
+  button:hover{ background:rgba(159,239,0,0.08); }
+  button:disabled{ opacity:0.4; cursor:default; }
+
+  .err{
+    color:#ef6a5f;
+    font-size:12px;
+    margin-top:12px;
+    max-width:640px;
+    text-align:center;
+    line-height:1.5;
+  }
+
+  .controls{
+    width:100%;
+    max-width:640px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:14px;
+    margin-top:16px;
+    padding:12px 14px;
+    border:1px solid var(--line);
+    background:var(--panel);
+    border-radius:2px;
+  }
+  .control-group{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:12px;
+    color:var(--text-dim);
+  }
+  .toggle{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    font-size:12px;
+    color:var(--text-dim);
+    cursor:pointer;
+    user-select:none;
+  }
+  .toggle input{
+    appearance:none;
+    -webkit-appearance:none;
+    width:30px;
+    height:16px;
+    border-radius:20px;
+    border:1px solid var(--accent-dim);
+    background:#0b0d0c;
+    position:relative;
+    cursor:pointer;
+    flex:none;
+    transition:border-color .15s;
+  }
+  .toggle input::after{
+    content:'';
+    position:absolute;
+    top:1px; left:1px;
+    width:12px; height:12px;
+    border-radius:50%;
+    background:var(--text-dim);
+    transition:transform .15s, background .15s;
+  }
+  .toggle input:checked{ border-color:var(--accent); }
+  .toggle input:checked::after{ background:var(--accent); transform:translateX(14px); }
+  .toggle input:disabled{ opacity:0.4; cursor:default; }
+
+  select, input[type="range"] {
+    font-family: var(--mono);
+    background: #0b0d0c;
+    border: 1px solid var(--accent-dim);
+    color: var(--text);
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: 2px;
+  }
+
+  .action-row{
+    width:100%;
+    max-width:640px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-top:14px;
+  }
+  .action-row button{ margin-top:0; }
+  .btn-secondary{
+    border-color:var(--line);
+    color:var(--text-dim);
+  }
+
+  .mini-panel{
+    width:100%;
+    max-width:640px;
+    margin-top:12px;
+    border:1px solid var(--line);
+    background:var(--panel);
+    border-radius:2px;
+    padding:14px 16px;
+  }
+  .mini-panel .panel-label{
+    font-size:10px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin-bottom:10px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  .mini-panel .panel-label .loading{
+    color:var(--accent-dim);
+    font-size:10px;
+    text-transform:none;
+    letter-spacing:normal;
+  }
+  .readout.small .tag{ font-size:12px; padding:4px 9px; }
+
+  .color-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    background: rgba(0,0,0,0.3);
+    border-radius: 2px;
+    font-size: 12px;
+  }
+  .color-swatch {
+    width: 16px; height: 16px;
+    border-radius: 2px;
+    border: 1px solid #fff;
+  }
+
+  .log-container {
+    max-height: 140px;
+    overflow-y: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .log-item {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    padding-bottom: 2px;
+  }
+  .log-time { color: var(--accent-dim); }
+
+  .text-block{
+    font-size:13px;
+    line-height:1.6;
+    color:var(--text);
+    white-space:pre-wrap;
+    word-break:break-word;
+    margin-bottom:10px;
+  }
+  .code-result{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .code-value{
+    font-size:13px;
+    color:var(--accent);
+    word-break:break-all;
+    border:1px solid var(--accent-dim);
+    background:rgba(159,239,0,0.05);
+    padding:8px 10px;
+    border-radius:2px;
+  }
+  .format-pill{
+    display:inline-block;
+    font-size:10px;
+    color:var(--text-dim);
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    margin-bottom:6px;
+  }
+  .inline-actions{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .inline-actions button, .inline-actions a{
+    font-family:var(--mono);
+    background:transparent;
+    border:1px solid var(--accent-dim);
+    color:var(--accent);
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    padding:6px 12px;
+    border-radius:2px;
+    cursor:pointer;
+    text-decoration:none;
+    display:inline-block;
+    margin:0;
+  }
+  .inline-actions button:hover, .inline-actions a:hover{ background:rgba(159,239,0,0.08); }
+</style>
+</head>
+<body>
+
+<h1>Object Scanner</h1>
+<div class="sub">hold something up to the camera</div>
+
+<div class="stage" id="stage">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="annotationCanvas"></canvas>
+  <canvas id="overlay"></canvas>
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <div class="crosshair" id="crosshair"></div>
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">Loading model…</span></div>
+</div>
+
+<button id="startBtn" disabled>Start Camera</button>
+<div class="err" id="err"></div>
+
+<div class="controls">
+  <label class="toggle">
+    <input type="checkbox" id="toggleHands">
+    <span class="label-text">Hand gestures</span>
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="togglePointer">
+    <span class="label-text">☝️ Pointer / Draw Mode</span>
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="toggleFace">
+    <span class="label-text">Face reactions</span>
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="toggleCodes">
+    <span class="label-text">QR / barcodes</span>
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="toggleHud">
+    <span class="label-text">Cyberpunk HUD</span>
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="toggleAutoRead">
+    <span class="label-text">Read aloud</span>
+  </label>
+
+  <div class="control-group">
+    <span>Filter:</span>
+    <select id="filterSelect">
+      <option value="none">Normal</option>
+      <option value="filter-cyberpunk">Cyberpunk Neon</option>
+      <option value="filter-thermal">Thermal Vision</option>
+      <option value="filter-matrix">Matrix Green</option>
+    </select>
+  </div>
+
+  <div class="control-group">
+    <span>Zoom:</span>
+    <input type="range" id="zoomRange" min="1" max="4" step="0.1" value="1">
+  </div>
+</div>
+
+<div class="action-row">
+  <button id="ocrBtn" disabled>Read Text On Screen</button>
+  <button id="clearDrawBtn" class="btn-secondary">Clear Drawings</button>
+</div>
+
+<div class="panel">
+  <div class="panel-label">
+    <span>Detected Items</span>
+    <span id="itemCountBadge" style="color:var(--accent);">Count: 0</span>
+  </div>
+  <div class="readout" id="readout"><span class="empty">Nothing yet.</span></div>
+  <div class="save-toast" id="saveToast"></div>
+</div>
+
+<div class="mini-panel" id="colorPanel">
+  <div class="panel-label">Target Color Finder</div>
+  <div class="color-badge" id="colorBadge">
+    <div class="color-swatch" id="colorSwatch" style="background:#000;"></div>
+    <span id="colorName">Sampling center pixel…</span>
+  </div>
+</div>
+
+<div class="mini-panel">
+  <div class="panel-label">
+    <span>Session Log</span>
+    <div>
+      <button id="exportCsvBtn" class="btn-secondary" style="font-size:9px; padding:3px 6px; margin:0;">Export CSV</button>
+      <button id="exportJsonBtn" class="btn-secondary" style="font-size:9px; padding:3px 6px; margin:0;">Export JSON</button>
+    </div>
+  </div>
+  <div class="log-container" id="logContainer">
+    <div class="log-item"><span>Session started</span><span class="log-time">Now</span></div>
+  </div>
+</div>
+
+<div class="mini-panel" id="handsPanel" style="display:none;">
+  <div class="panel-label"><span>Hand gestures</span><span class="loading" id="handsLoading"></span></div>
+  <div class="readout small" id="handsReadout"><span class="empty">No hands in frame.</span></div>
+</div>
+
+<div class="mini-panel" id="facePanel" style="display:none;">
+  <div class="panel-label"><span>Face reactions</span><span class="loading" id="faceLoading"></span></div>
+  <div class="readout small" id="faceReadout"><span class="empty">No face in frame.</span></div>
+</div>
+
+<div class="mini-panel" id="textPanel" style="display:none;">
+  <div class="panel-label"><span>Read text</span><span class="loading" id="textLoading"></span></div>
+  <div id="textContent"></div>
+</div>
+
+<div class="mini-panel" id="codesPanel" style="display:none;">
+  <div class="panel-label"><span>QR / barcode</span><span class="loading" id="codesLoading"></span></div>
+  <div id="codesContent"><span class="empty">Nothing scanned yet.</span></div>
+</div>
+
+<div class="panel corrections" id="correctionsPanel" style="display:none;">
+  <div class="panel-label">Your corrections</div>
+  <div id="correctionsList"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
+<script type="module">
+import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const annotationCanvas = document.getElementById('annotationCanvas');
+const annotationCtx = annotationCanvas.getContext('2d');
+
+const startBtn = document.getElementById('startBtn');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const readout = document.getElementById('readout');
+const itemCountBadge = document.getElementById('itemCountBadge');
+const errEl = document.getElementById('err');
+const ocrBtn = document.getElementById('ocrBtn');
+const clearDrawBtn = document.getElementById('clearDrawBtn');
+
+const toggleHands = document.getElementById('toggleHands');
+const togglePointer = document.getElementById('togglePointer');
+const toggleFace = document.getElementById('toggleFace');
+const toggleCodes = document.getElementById('toggleCodes');
+const toggleHud = document.getElementById('toggleHud');
+const toggleAutoRead = document.getElementById('toggleAutoRead');
+const filterSelect = document.getElementById('filterSelect');
+const zoomRange = document.getElementById('zoomRange');
+
+const handsPanel = document.getElementById('handsPanel');
+const handsReadout = document.getElementById('handsReadout');
+const handsLoading = document.getElementById('handsLoading');
+
+const facePanel = document.getElementById('facePanel');
+const faceReadout = document.getElementById('faceReadout');
+const faceLoading = document.getElementById('faceLoading');
+
+const textPanel = document.getElementById('textPanel');
+const textContent = document.getElementById('textContent');
+const textLoading = document.getElementById('textLoading');
+
+const codesPanel = document.getElementById('codesPanel');
+const codesContent = document.getElementById('codesContent');
+const codesLoading = document.getElementById('codesLoading');
+
+const colorSwatch = document.getElementById('colorSwatch');
+const colorName = document.getElementById('colorName');
+const logContainer = document.getElementById('logContainer');
+
+let model = null;
+let gestureRecognizer = null;
+let faceApiReady = false;
+let barcodeDetectorNative = null;
+let videoTrack = null;
+let running = false;
+
+const enabled = { hands: false, pointer: false, face: false, codes: false, hud: false };
+let autoRead = false;
+
+let lastObjectPreds = [];
+let lastHandResult = null;
+let lastFaceResult = [];
+let lastSpokenCode = null;
+let ocrBusy = false;
+
+let lastPointerPos = null;
+const sessionLog = [];
+let scanlineY = 0;
+
+// MediaPipe Hand Skeleton connections
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+// Color Palette standard lookup dictionary
+const COLOR_PALETTE = [
+  { name: 'Red', r: 255, g: 0, b: 0 },
+  { name: 'Crimson Red', r: 220, g: 20, b: 60 },
+  { name: 'Dark Red', r: 139, g: 0, b: 0 },
+  { name: 'Orange', r: 255, g: 165, b: 0 },
+  { name: 'Yellow / Gold', r: 255, g: 215, b: 0 },
+  { name: 'Lime Green', r: 50, g: 205, b: 50 },
+  { name: 'Forest Green', r: 34, g: 139, b: 34 },
+  { name: 'Olive Green', r: 128, g: 128, b: 0 },
+  { name: 'Cyan / Aqua', r: 0, g: 255, b: 255 },
+  { name: 'Sky Blue', r: 135, g: 206, b: 235 },
+  { name: 'Royal Blue', r: 65, g: 105, b: 225 },
+  { name: 'Navy Blue', r: 0, g: 0, b: 128 },
+  { name: 'Purple', r: 128, g: 0, b: 128 },
+  { name: 'Magenta / Pink', r: 255, g: 0, b: 255 },
+  { name: 'White', r: 255, g: 255, b: 255 },
+  { name: 'Light Gray', r: 213, g: 213, b: 213 },
+  { name: 'Dark Gray', r: 64, g: 64, b: 64 },
+  { name: 'Black', r: 15, g: 15, b: 15 },
+  { name: 'Brown / Chocolate', r: 139, g: 69, b: 19 }
+];
+
+const CORRECTIONS_KEY = 'objectScanner.corrections.v1';
+const CONFIRMED_KEY = 'objectScanner.confirmed.v1';
+
+function loadCorrections(){
+  try{
+    const raw = localStorage.getItem(CORRECTIONS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  }catch(e){ return {}; }
+}
+function saveCorrections(){
+  try{ localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(corrections)); }catch(e){ }
+}
+function loadConfirmed(){
+  try{
+    const raw = localStorage.getItem(CONFIRMED_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  }catch(e){ return new Set(); }
+}
+function saveConfirmed(){
+  try{ localStorage.setItem(CONFIRMED_KEY, JSON.stringify([...confirmedClasses])); }catch(e){ }
+}
+
+const corrections = loadCorrections();
+const confirmedClasses = loadConfirmed();
+let editingClass = null;
+let toastTimer = null;
+
+function showToast(msg){
+  const el = document.getElementById('saveToast');
+  if(!el) return;
+  el.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.textContent = ''; }, 1600);
+}
+
+function displayName(originalClass){
+  return corrections[originalClass] || originalClass;
+}
+
+function escapeHtml(str){
+  return str.replace(/[&<>"']/g, c => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[c]));
+}
+
+function speak(text){
+  if(!('speechSynthesis' in window) || !text) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  window.speechSynthesis.speak(utter);
+}
+
+function logEvent(type, label){
+  const time = new Date().toLocaleTimeString();
+  sessionLog.unshift({ time, type, label });
+  if(sessionLog.length > 50) sessionLog.pop();
+
+  const item = document.createElement('div');
+  item.className = 'log-item';
+  item.innerHTML = `<span>[${escapeHtml(type)}] ${escapeHtml(label)}</span><span class="log-time">${time}</span>`;
+  logContainer.prepend(item);
+}
+
+function renderCorrectionsList(){
+  const panel = document.getElementById('correctionsPanel');
+  const list = document.getElementById('correctionsList');
+  const entries = Object.entries(corrections);
+
+  if(entries.length === 0){
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  list.innerHTML = entries.map(([orig, custom]) => `
+    <div class="correction-row">
+      <div><span class="from">${escapeHtml(orig)}</span><span class="arrow">→</span><span class="to">${escapeHtml(custom)}</span></div>
+      <button class="remove" data-remove="${escapeHtml(orig)}">Remove</button>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      delete corrections[btn.dataset.remove];
+      saveCorrections();
+      renderCorrectionsList();
+    });
+  });
+}
+
+function startEdit(cls){
+  editingClass = cls;
+  renderEditForm(cls);
+}
+
+function renderEditForm(cls){
+  readout.innerHTML = `
+    <div class="edit-form">
+      <div class="hint">Model said "${escapeHtml(cls)}" — what is it really?</div>
+      <input id="correctionInput" type="text" value="${escapeHtml(corrections[cls] || '')}" placeholder="e.g. my water bottle" autocomplete="off" />
+      <button id="saveCorrection" type="button">Save</button>
+      <button id="cancelCorrection" type="button" class="cancel">Cancel</button>
+    </div>
+  `;
+  const input = document.getElementById('correctionInput');
+  input.focus();
+  input.select();
+
+  const save = () => {
+    const val = input.value.trim();
+    if(val){
+      corrections[cls] = val;
+      confirmedClasses.add(cls);
+      saveConfirmed();
+    }else{
+      delete corrections[cls];
+    }
+    saveCorrections();
+    editingClass = null;
+    renderCorrectionsList();
+    showToast(`Saved: ${val || cls}`);
+  };
+  const cancel = () => { editingClass = null; };
+
+  document.getElementById('saveCorrection').addEventListener('click', save);
+  document.getElementById('cancelCorrection').addEventListener('click', cancel);
+  input.addEventListener('keydown', e => {
+    if(e.key === 'Enter') save();
+    if(e.key === 'Escape') cancel();
+  });
+}
+
+function showError(msg){
+  errEl.textContent = msg;
+}
+
+async function loadModel(){
+  try{
+    model = await cocoSsd.load({ base: 'mobilenet_v2' });
+    statusText.textContent = 'Model ready';
+    startBtn.disabled = false;
+  }catch(e){
+    showError('Could not load object detection model.');
+    statusText.textContent = 'Model failed';
+  }
+}
+
+const GESTURE_INFO = {
+  Thumb_Up:    { emoji: '👍', label: 'Thumbs up' },
+  Thumb_Down:  { emoji: '👎', label: 'Dislike' },
+  Victory:     { emoji: '✌️', label: 'Victory' },
+  ILoveYou:    { emoji: '🤟', label: 'Love / I love you' },
+  Closed_Fist: { emoji: '👊', label: 'Fist / punch' },
+  Open_Palm:   { emoji: '🖐️', label: 'Open hand' },
+  Pointing_Up: { emoji: '☝️', label: 'Pointing up' },
+  None:        { emoji: '🤚', label: 'Hand' }
+};
+function gestureInfo(name){
+  return GESTURE_INFO[name] || { emoji: '🤚', label: name || 'Hand' };
+}
+
+async function ensureGestureRecognizer(){
+  if(gestureRecognizer) return true;
+  handsLoading.textContent = 'Loading model…';
+  try{
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+    );
+    gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task'
+      },
+      runningMode: 'VIDEO',
+      numHands: 2
+    });
+    handsLoading.textContent = '';
+    return true;
+  }catch(e){
+    handsLoading.textContent = 'Failed';
+    handsReadout.innerHTML = '<span class="empty">Could not load hand model.</span>';
+    return false;
+  }
+}
+
+const FACE_EMOJI = {
+  neutral: '😐', happy: '😄', sad: '😢', angry: '😠',
+  fearful: '😨', disgusted: '🤢', surprised: '😲'
+};
+async function ensureFaceApi(){
+  if(faceApiReady) return true;
+  faceLoading.textContent = 'Loading model…';
+  try{
+    const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+    faceApiReady = true;
+    faceLoading.textContent = '';
+    return true;
+  }catch(e){
+    faceLoading.textContent = 'Failed';
+    faceReadout.innerHTML = '<span class="empty">Could not load face model.</span>';
+    return false;
+  }
+}
+
+if('BarcodeDetector' in window){
+  try{
+    barcodeDetectorNative = new BarcodeDetector({
+      formats: ['qr_code','ean_13','ean_8','upc_a','upc_e','code_128','code_39','codabar','itf','pdf417','data_matrix']
+    });
+  }catch(e){ barcodeDetectorNative = null; }
+}
+const codeCanvas = document.createElement('canvas');
+const codeCtx = codeCanvas.getContext('2d', { willReadFrequently: true });
+
+function looksLikeUrl(str){
+  return /^(https?:\/\/|www\.)\S+$/i.test(str.trim());
+}
+function toHref(str){
+  const s = str.trim();
+  return /^https?:\/\//i.test(s) ? s : 'https://' + s;
+}
+
+async function startCamera(){
+  startBtn.disabled = true;
+  statusText.textContent = 'Requesting camera…';
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    videoTrack = stream.getVideoTracks()[0];
+    await new Promise(res => video.onloadedmetadata = res);
+    video.play();
+
+    overlay.width = annotationCanvas.width = video.videoWidth;
+    overlay.height = annotationCanvas.height = video.videoHeight;
+
+    running = true;
+    statusEl.classList.add('live');
+    statusText.textContent = 'Live';
+    ocrBtn.disabled = false;
+
+    detectLoop();
+    handLoop();
+    faceLoop();
+    codeLoop();
+    colorLoop();
+  }catch(e){
+    startBtn.disabled = false;
+    showError('Could not access camera: ' + e.message);
+    statusText.textContent = 'Camera unavailable';
+  }
+}
+
+const COLOR_PERSON = '#5ee66f';
+const COLOR_OBJECT = '#ef5f5f';
+const COLOR_HAND = '#5fb8ef';
+const COLOR_FACE = '#e6c15e';
+
+function mirrorX(x, w){ return overlay.width - x - w; }
+
+function drawBox(x, y, w, h, color, label){
+  ctx.strokeStyle = color;
+  ctx.strokeRect(x, y, w, h);
+  const textWidth = ctx.measureText(label).width;
+  ctx.fillStyle = color;
+  ctx.fillRect(x - 1, y - 22, textWidth + 10, 22);
+  ctx.fillStyle = '#0b0d0c';
+  ctx.fillText(label, x + 4, y - 6);
+}
+
+function renderOverlay(){
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  ctx.lineWidth = 2;
+  ctx.font = '16px monospace';
+
+  // Cyberpunk Animated Scanline & HUD Reticles
+  if(enabled.hud){
+    scanlineY = (scanlineY + 3) % overlay.height;
+    ctx.strokeStyle = 'rgba(159, 239, 0, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, scanlineY);
+    ctx.lineTo(overlay.width, scanlineY);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(159, 239, 0, 0.4)';
+    ctx.fillText('SYS.HUD // ONLINE', 16, 28);
+    ctx.fillText(`FPS: 60  RES: ${overlay.width}x${overlay.height}`, 16, 46);
+  }
+
+  // Draw Objects
+  lastObjectPreds.forEach(p => {
+    const [bx, y, w, h] = p.bbox;
+    const x = mirrorX(bx, w);
+    const color = p.class === 'person' ? COLOR_PERSON : COLOR_OBJECT;
+    const label = `${displayName(p.class)} ${Math.round(p.score * 100)}%`;
+    drawBox(x, y, w, h, color, label);
+  });
+
+  // Render Hands: Full Skeleton mode vs Virtual Pointer mode
+  if(enabled.hands && lastHandResult && lastHandResult.landmarks){
+    const vw = video.videoWidth, vh = video.videoHeight;
+    lastHandResult.landmarks.forEach((hand, i) => {
+
+      // Virtual Pointer / Drawing Mode
+      if(enabled.pointer){
+        const indexTip = hand[8]; // Index Finger Tip landmark
+        const px = mirrorX(indexTip.x * vw, 0);
+        const py = indexTip.y * vh;
+
+        // Draw active finger pointer ring
+        ctx.strokeStyle = '#9fef00';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(px, py, 10, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        // Draw annotation lines onto persistent canvas layer
+        if(lastPointerPos){
+          annotationCtx.strokeStyle = '#9fef00';
+          annotationCtx.lineWidth = 4;
+          annotationCtx.lineCap = 'round';
+          annotationCtx.beginPath();
+          annotationCtx.moveTo(lastPointerPos.x, lastPointerPos.y);
+          annotationCtx.lineTo(px, py);
+          annotationCtx.stroke();
+        }
+        lastPointerPos = { x: px, y: py };
+      } 
+      // Default Skeleton Mode (Always active when pointer is off)
+      else {
+        lastPointerPos = null;
+
+        // Bounding box
+        let minX=1, maxX=0, minY=1, maxY=0;
+        hand.forEach(pt => {
+          minX = Math.min(minX, pt.x); maxX = Math.max(maxX, pt.x);
+          minY = Math.min(minY, pt.y); maxY = Math.max(maxY, pt.y);
+        });
+        const bw = (maxX - minX) * vw, bh = (maxY - minY) * vh;
+        const bx = minX * vw, by = minY * vh;
+        const x = mirrorX(bx, bw);
+        const g = lastHandResult.gestures && lastHandResult.gestures[i] && lastHandResult.gestures[i][0];
+        const info = gestureInfo(g ? g.categoryName : 'None');
+        const label = g ? `${info.emoji} ${info.label} ${Math.round(g.score*100)}%` : `${info.emoji} Hand`;
+        drawBox(x, by, bw, bh, COLOR_HAND, label);
+
+        // Skeleton Joints & Bones
+        ctx.strokeStyle = '#5fb8ef';
+        ctx.lineWidth = 2;
+        HAND_CONNECTIONS.forEach(([p1, p2]) => {
+          const pt1 = hand[p1], pt2 = hand[p2];
+          ctx.beginPath();
+          ctx.moveTo(mirrorX(pt1.x * vw, 0), pt1.y * vh);
+          ctx.lineTo(mirrorX(pt2.x * vw, 0), pt2.y * vh);
+          ctx.stroke();
+        });
+
+        // Joint Points
+        ctx.fillStyle = '#ffffff';
+        hand.forEach(pt => {
+          ctx.beginPath();
+          ctx.arc(mirrorX(pt.x * vw, 0), pt.y * vh, 3, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+      }
+    });
+  } else {
+    lastPointerPos = null;
+  }
+
+  // Draw Faces
+  if(enabled.face && lastFaceResult && lastFaceResult.length){
+    lastFaceResult.forEach(det => {
+      const box = det.detection.box;
+      const x = mirrorX(box.x, box.width);
+      const top = Object.entries(det.expressions).sort((a,b) => b[1]-a[1])[0];
+      const info = FACE_EMOJI[top[0]] || '🙂';
+      const label = `${info} ${top[0]} ${Math.round(top[1]*100)}%`;
+      drawBox(x, box.y, box.width, box.height, COLOR_FACE, label);
+    });
+  }
+}
+
+function updateReadout(predictions){
+  if(editingClass !== null) return;
+
+  const counts = {};
+  const byClass = {};
+  predictions.forEach(p => {
+    const name = displayName(p.class);
+    counts[name] = (counts[name] || 0) + 1;
+    if(!byClass[p.class] || byClass[p.class] < p.score){
+      byClass[p.class] = p.score;
+    }
+  });
+
+  // Item Counter Display
+  const totalCount = predictions.length;
+  const countStr = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ');
+  itemCountBadge.textContent = totalCount > 0 ? `Count: ${totalCount} (${countStr})` : 'Count: 0';
+
+  const entries = Object.entries(byClass).sort((a,b) => b[1]-a[1]);
+
+  if(entries.length === 0){
+    readout.innerHTML = '<span class="empty">Nothing recognized right now.</span>';
+    return;
+  }
+
+  readout.innerHTML = entries.map(([cls, score]) => {
+    const color = cls === 'person' ? '#5ee66f' : '#ef5f5f';
+    const confirmed = confirmedClasses.has(cls);
+    return `<span class="tag" style="color:${color}; border-color:${color};">${escapeHtml(displayName(cls))}<span class="pct">${Math.round(score*100)}%</span><button class="confirm-btn" data-cls="${escapeHtml(cls)}" title="Save">${confirmed ? '✓' : '✓?'}</button><button class="edit-btn" data-cls="${escapeHtml(cls)}" title="Fix">✎</button></span>`;
+  }).join('');
+
+  readout.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => startEdit(btn.dataset.cls));
+  });
+  readout.querySelectorAll('.confirm-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cls = btn.dataset.cls;
+      confirmedClasses.add(cls);
+      saveConfirmed();
+      showToast(`Confirmed: ${displayName(cls)}`);
+      logEvent('Object Saved', displayName(cls));
+      updateReadout(lastObjectPreds);
+    });
+  });
+}
+
+function updateHandsReadout(result){
+  if(!result || !result.gestures || result.gestures.length === 0){
+    handsReadout.innerHTML = '<span class="empty">No hands in frame.</span>';
+    return;
+  }
+  handsReadout.innerHTML = result.gestures.map(g => {
+    const top = g[0];
+    const info = gestureInfo(top ? top.categoryName : 'None');
+    return `<span class="tag" style="color:${COLOR_HAND}; border-color:${COLOR_HAND};">${info.emoji} ${escapeHtml(info.label)}<span class="pct">${Math.round((top ? top.score : 0)*100)}%</span></span>`;
+  }).join('');
+}
+
+function updateFaceReadout(detections){
+  if(!detections || detections.length === 0){
+    faceReadout.innerHTML = '<span class="empty">No face in frame.</span>';
+    return;
+  }
+  faceReadout.innerHTML = detections.map(det => {
+    const top = Object.entries(det.expressions).sort((a,b) => b[1]-a[1])[0];
+    const emoji = FACE_EMOJI[top[0]] || '🙂';
+    return `<span class="tag" style="color:${COLOR_FACE}; border-color:${COLOR_FACE};">${emoji} ${escapeHtml(top[0])}<span class="pct">${Math.round(top[1]*100)}%</span></span>`;
+  }).join('');
+}
+
+function updateCodesReadout(found){
+  codesPanel.style.display = 'block';
+  const isUrl = looksLikeUrl(found.text);
+  codesContent.innerHTML = `
+    <div class="code-result">
+      <div><span class="format-pill">${escapeHtml(found.format)}</span></div>
+      <div class="code-value">${escapeHtml(found.text)}</div>
+      <div class="inline-actions">
+        ${isUrl ? `<a href="${escapeHtml(toHref(found.text))}" target="_blank" rel="noopener noreferrer">Open Link ↗</a>` : ''}
+        <button type="button" id="speakCodeBtn">🔊 Read Aloud</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('speakCodeBtn').addEventListener('click', () => speak(found.text));
+
+  if(lastSpokenCode !== found.text){
+    logEvent('Code Scanned', `${found.format}: ${found.text}`);
+    if(autoRead) speak(found.text);
+    lastSpokenCode = found.text;
+  }
+}
+
+// Color Sampler & Closest Named Color Finder
+function sampleCenterColor(){
+  if(!running || video.readyState < 2) return;
+  codeCanvas.width = video.videoWidth;
+  codeCanvas.height = video.videoHeight;
+  codeCtx.drawImage(video, 0, 0);
+
+  const cx = Math.floor(video.videoWidth / 2);
+  const cy = Math.floor(video.videoHeight / 2);
+  const pixel = codeCtx.getImageData(cx, cy, 1, 1).data;
+  const [r, g, b] = pixel;
+
+  // Closest Euclidean Distance in RGB space
+  let closest = COLOR_PALETTE[0];
+  let minDistance = Infinity;
+
+  COLOR_PALETTE.forEach(c => {
+    const dist = Math.sqrt((r - c.r)**2 + (g - c.g)**2 + (b - c.b)**2);
+    if(dist < minDistance){
+      minDistance = dist;
+      closest = c;
+    }
+  });
+
+  const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+  colorSwatch.style.background = hex;
+  colorName.textContent = `${closest.name} (${hex} | RGB:${r},${g},${b})`;
+}
+
+async function detectLoop(){
+  if(!running) return;
+  try{
+    lastObjectPreds = await model.detect(video, 20, 0.45);
+    renderOverlay();
+    updateReadout(lastObjectPreds);
+  }catch(e){ }
+  requestAnimationFrame(detectLoop);
+}
+
+async function handLoop(){
+  if(!running) return;
+  if((enabled.hands || enabled.pointer) && gestureRecognizer){
+    try{
+      lastHandResult = gestureRecognizer.recognizeForVideo(video, performance.now());
+      updateHandsReadout(lastHandResult);
+      renderOverlay();
+    }catch(e){ }
+  }else{
+    lastHandResult = null;
+  }
+  requestAnimationFrame(handLoop);
+}
+
+async function faceLoop(){
+  if(!running) return;
+  if(enabled.face && faceApiReady){
+    try{
+      lastFaceResult = await faceapi
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+        .withFaceExpressions();
+      updateFaceReadout(lastFaceResult);
+      renderOverlay();
+    }catch(e){ }
+  }else{
+    lastFaceResult = [];
+  }
+  setTimeout(faceLoop, 180);
+}
+
+let codeBusy = false;
+async function codeLoop(){
+  if(!running) return;
+  if(enabled.codes && !codeBusy && video.readyState >= 2){
+    codeBusy = true;
+    try{
+      let found = null;
+      if(barcodeDetectorNative){
+        const results = await barcodeDetectorNative.detect(video);
+        if(results.length){
+          found = { text: results[0].rawValue, format: results[0].format };
+        }
+      }
+      if(!found){
+        const vw = video.videoWidth, vh = video.videoHeight;
+        const scale = Math.min(1, 640 / vw);
+        const w = Math.round(vw * scale), h = Math.round(vh * scale);
+        codeCanvas.width = w; codeCanvas.height = h;
+        codeCtx.drawImage(video, 0, 0, w, h);
+        const imgData = codeCtx.getImageData(0, 0, w, h);
+        const qr = jsQR(imgData.data, w, h);
+        if(qr && qr.data){
+          found = { text: qr.data, format: 'QR_CODE' };
+        }
+      }
+      if(found) updateCodesReadout(found);
+    }catch(e){ }
+    codeBusy = false;
+  }
+  setTimeout(codeLoop, 350);
+}
+
+function colorLoop(){
+  if(running){
+    sampleCenterColor();
+  }
+  setTimeout(colorLoop, 250);
+}
+
+async function readTextOnScreen(){
+  if(ocrBusy) return;
+  ocrBusy = true;
+  ocrBtn.disabled = true;
+  textPanel.style.display = 'block';
+  textLoading.textContent = 'Reading…';
+  textContent.innerHTML = '';
+  try{
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const scaleFactor = vw < 1000 ? 2 : 1;
+    const shot = document.createElement('canvas');
+    shot.width = vw * scaleFactor; shot.height = vh * scaleFactor;
+    const shotCtx = shot.getContext('2d');
+    shotCtx.translate(shot.width, 0);
+    shotCtx.scale(-scaleFactor, scaleFactor);
+    shotCtx.drawImage(video, 0, 0, vw, vh);
+
+    const imgData = shotCtx.getImageData(0, 0, shot.width, shot.height);
+    const d = imgData.data;
+    for(let i = 0; i < d.length; i += 4){
+      const gray = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+      const contrasted = Math.min(255, Math.max(0, (gray - 128) * 1.4 + 128));
+      d[i] = d[i+1] = d[i+2] = contrasted;
+    }
+    shotCtx.putImageData(imgData, 0, 0);
+
+    const { data } = await Tesseract.recognize(shot, 'eng');
+    const text = (data.text || '').trim();
+    if(!text){
+      textContent.innerHTML = '<span class="empty">No readable text found.</span>';
+    }else{
+      textContent.innerHTML = `
+        <div class="text-block">${escapeHtml(text)}</div>
+        <div class="inline-actions">
+          <button type="button" id="speakTextBtn">🔊 Read Aloud</button>
+        </div>
+      `;
+      logEvent('OCR Text Read', text.substring(0, 30) + '...');
+      document.getElementById('speakTextBtn').addEventListener('click', () => speak(text));
+      if(autoRead) speak(text);
+    }
+  }catch(e){
+    textContent.innerHTML = '<span class="empty">Could not read text right now.</span>';
+  }
+  textLoading.textContent = '';
+  ocrBtn.disabled = false;
+  ocrBusy = false;
+}
+
+// Control Toggles & Event Handlers
+toggleHands.addEventListener('change', async () => {
+  enabled.hands = toggleHands.checked;
+  handsPanel.style.display = enabled.hands ? 'block' : 'none';
+  if(enabled.hands){
+    toggleHands.disabled = true;
+    const ok = await ensureGestureRecognizer();
+    toggleHands.disabled = false;
+    if(!ok) toggleHands.checked = enabled.hands = false;
+  }
+});
+
+togglePointer.addEventListener('change', async () => {
+  enabled.pointer = togglePointer.checked;
+  if(enabled.pointer){
+    togglePointer.disabled = true;
+    const ok = await ensureGestureRecognizer();
+    togglePointer.disabled = false;
+    if(!ok) togglePointer.checked = enabled.pointer = false;
+  }
+});
+
+toggleFace.addEventListener('change', async () => {
+  enabled.face = toggleFace.checked;
+  facePanel.style.display = enabled.face ? 'block' : 'none';
+  if(enabled.face){
+    toggleFace.disabled = true;
+    const ok = await ensureFaceApi();
+    toggleFace.disabled = false;
+    if(!ok) toggleFace.checked = enabled.face = false;
+  }
+});
+
+toggleCodes.addEventListener('change', () => {
+  enabled.codes = toggleCodes.checked;
+  codesPanel.style.display = enabled.codes ? 'block' : 'none';
+});
+
+toggleHud.addEventListener('change', () => {
+  enabled.hud = toggleHud.checked;
+});
+
+toggleAutoRead.addEventListener('change', () => {
+  autoRead = toggleAutoRead.checked;
+});
+
+filterSelect.addEventListener('change', () => {
+  video.className = filterSelect.value === 'none' ? '' : filterSelect.value;
+});
+
+// Digital Camera Zoom Handler
+zoomRange.addEventListener('input', () => {
+  const zoomVal = parseFloat(zoomRange.value);
+  if(videoTrack && 'applyConstraints' in videoTrack){
+    const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+    if(capabilities.zoom){
+      videoTrack.applyConstraints({ advanced: [{ zoom: zoomVal }] }).catch(() => {});
+      return;
+    }
+  }
+  // Digital CSS Fallback Zoom
+  video.style.transform = `scaleX(-1) scale(${zoomVal})`;
+});
+
+clearDrawBtn.addEventListener('click', () => {
+  annotationCtx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+});
+
+// Session Export Handlers (CSV / JSON)
+document.getElementById('exportCsvBtn').addEventListener('click', () => {
+  if(sessionLog.length === 0) return alert('No log entries to export.');
+  let csv = 'Time,Type,Label\n';
+  sessionLog.forEach(row => {
+    csv += `"${row.time}","${row.type}","${row.label.replace(/"/g, '""')}"\n`;
+  });
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `scanner-log-${Date.now()}.csv`;
+  a.click();
+});
+
+document.getElementById('exportJsonBtn').addEventListener('click', () => {
+  if(sessionLog.length === 0) return alert('No log entries to export.');
+  const blob = new Blob([JSON.stringify(sessionLog, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `scanner-log-${Date.now()}.json`;
+  a.click();
+});
+
+ocrBtn.addEventListener('click', readTextOnScreen);
+startBtn.addEventListener('click', startCamera);
+renderCorrectionsList();
+loadModel();
+</script>
+
+</body>
+</html>
