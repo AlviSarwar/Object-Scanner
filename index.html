@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Object Scanner: a 100% in-browser computer vision tool for object detection, hand gestures, face reactions, OCR and QR/barcode scanning. No server, no uploads.">
+<meta name="theme-color" content="#0b0d0c">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%B7%3C/text%3E%3C/svg%3E">
 <title>Object Scanner - Cyberpunk HUD Edition</title>
 <style>
   :root{
@@ -484,7 +488,7 @@
   <div class="corner bl"></div>
   <div class="corner br"></div>
   <div class="crosshair" id="crosshair"></div>
-  <div class="status" id="status"><span class="dot"></span><span id="statusText">Loading model…</span></div>
+  <div class="status" id="status" role="status" aria-live="polite"><span class="dot"></span><span id="statusText">Loading model…</span></div>
 </div>
 
 <button id="startBtn" disabled>Start Camera</button>
@@ -656,6 +660,8 @@ const enabled = { hands: false, pointer: false, face: false, codes: false, hud: 
 let autoRead = false;
 
 let lastObjectPreds = [];
+let lastReadoutKey = null;
+let fps = 0, fpsFrames = 0, fpsStamp = performance.now();
 let lastHandResult = null;
 let lastFaceResult = [];
 let lastSpokenCode = null;
@@ -793,6 +799,7 @@ function startEdit(cls){
 }
 
 function renderEditForm(cls){
+  lastReadoutKey = null;
   readout.innerHTML = `
     <div class="edit-form">
       <div class="hint">Model said "${escapeHtml(cls)}" — what is it really?</div>
@@ -921,6 +928,11 @@ function toHref(str){
 }
 
 async function startCamera(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    showError('Camera access needs a secure page. Open this app from https:// or http://localhost (not a plain http:// address).');
+    statusText.textContent = 'Camera unavailable';
+    return;
+  }
   startBtn.disabled = true;
   statusText.textContent = 'Requesting camera…';
   try{
@@ -987,7 +999,7 @@ function renderOverlay(){
 
     ctx.fillStyle = 'rgba(159, 239, 0, 0.4)';
     ctx.fillText('SYS.HUD // ONLINE', 16, 28);
-    ctx.fillText(`FPS: 60  RES: ${overlay.width}x${overlay.height}`, 16, 46);
+    ctx.fillText(`FPS: ${fps}  RES: ${overlay.width}x${overlay.height}`, 16, 46);
   }
 
   // Draw Objects
@@ -1105,14 +1117,29 @@ function updateReadout(predictions){
   const entries = Object.entries(byClass).sort((a,b) => b[1]-a[1]);
 
   if(entries.length === 0){
-    readout.innerHTML = '<span class="empty">Nothing recognized right now.</span>';
+    if(lastReadoutKey !== 'empty'){
+      readout.innerHTML = '<span class="empty">Nothing recognized right now.</span>';
+      lastReadoutKey = 'empty';
+    }
     return;
   }
+
+  // Only rebuild the DOM when the set of tags changes. Rebuilding every frame
+  // destroys the buttons mid-click, so the confirm/edit buttons stop working.
+  const key = entries.map(([cls]) => `${cls}|${displayName(cls)}|${confirmedClasses.has(cls)}`).join(';');
+  if(key === lastReadoutKey){
+    readout.querySelectorAll('.pct').forEach(el => {
+      const score = byClass[el.dataset.cls];
+      if(score !== undefined) el.textContent = `${Math.round(score*100)}%`;
+    });
+    return;
+  }
+  lastReadoutKey = key;
 
   readout.innerHTML = entries.map(([cls, score]) => {
     const color = cls === 'person' ? '#5ee66f' : '#ef5f5f';
     const confirmed = confirmedClasses.has(cls);
-    return `<span class="tag" style="color:${color}; border-color:${color};">${escapeHtml(displayName(cls))}<span class="pct">${Math.round(score*100)}%</span><button class="confirm-btn" data-cls="${escapeHtml(cls)}" title="Save">${confirmed ? '✓' : '✓?'}</button><button class="edit-btn" data-cls="${escapeHtml(cls)}" title="Fix">✎</button></span>`;
+    return `<span class="tag" style="color:${color}; border-color:${color};">${escapeHtml(displayName(cls))}<span class="pct" data-cls="${escapeHtml(cls)}">${Math.round(score*100)}%</span><button class="confirm-btn" data-cls="${escapeHtml(cls)}" title="Save" aria-label="Confirm ${escapeHtml(displayName(cls))}">${confirmed ? '✓' : '✓?'}</button><button class="edit-btn" data-cls="${escapeHtml(cls)}" title="Fix" aria-label="Rename ${escapeHtml(displayName(cls))}">✎</button></span>`;
   }).join('');
 
   readout.querySelectorAll('.edit-btn').forEach(btn => {
@@ -1177,15 +1204,18 @@ function updateCodesReadout(found){
 }
 
 // Color Sampler & Closest Named Color Finder
+const colorCanvas = document.createElement('canvas');
+colorCanvas.width = colorCanvas.height = 1;
+const colorCtx = colorCanvas.getContext('2d', { willReadFrequently: true });
+
 function sampleCenterColor(){
   if(!running || video.readyState < 2) return;
-  codeCanvas.width = video.videoWidth;
-  codeCanvas.height = video.videoHeight;
-  codeCtx.drawImage(video, 0, 0);
 
+  // Copy just the centre pixel instead of resizing a full-frame canvas.
   const cx = Math.floor(video.videoWidth / 2);
   const cy = Math.floor(video.videoHeight / 2);
-  const pixel = codeCtx.getImageData(cx, cy, 1, 1).data;
+  colorCtx.drawImage(video, cx, cy, 1, 1, 0, 0, 1, 1);
+  const pixel = colorCtx.getImageData(0, 0, 1, 1).data;
   const [r, g, b] = pixel;
 
   // Closest Euclidean Distance in RGB space
@@ -1209,6 +1239,13 @@ async function detectLoop(){
   if(!running) return;
   try{
     lastObjectPreds = await model.detect(video, 20, 0.45);
+    fpsFrames++;
+    const now = performance.now();
+    if(now - fpsStamp >= 1000){
+      fps = Math.round(fpsFrames * 1000 / (now - fpsStamp));
+      fpsFrames = 0;
+      fpsStamp = now;
+    }
     renderOverlay();
     updateReadout(lastObjectPreds);
   }catch(e){ }
@@ -1297,9 +1334,9 @@ async function readTextOnScreen(){
     const shot = document.createElement('canvas');
     shot.width = vw * scaleFactor; shot.height = vh * scaleFactor;
     const shotCtx = shot.getContext('2d');
-    shotCtx.translate(shot.width, 0);
-    shotCtx.scale(-scaleFactor, scaleFactor);
-    shotCtx.drawImage(video, 0, 0, vw, vh);
+    // The <video> is only mirrored with CSS; the raw frame is not mirrored,
+    // so text is already readable. Flipping it here would mirror the text.
+    shotCtx.drawImage(video, 0, 0, shot.width, shot.height);
 
     const imgData = shotCtx.getImageData(0, 0, shot.width, shot.height);
     const d = imgData.data;
@@ -1393,8 +1430,10 @@ zoomRange.addEventListener('input', () => {
       return;
     }
   }
-  // Digital CSS Fallback Zoom
+  // Digital CSS fallback zoom. Scale the overlays too so boxes and drawings
+  // stay aligned with what is visible in the video.
   video.style.transform = `scaleX(-1) scale(${zoomVal})`;
+  overlay.style.transform = annotationCanvas.style.transform = `scale(${zoomVal})`;
 });
 
 clearDrawBtn.addEventListener('click', () => {
